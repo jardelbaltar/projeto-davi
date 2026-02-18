@@ -1,1 +1,542 @@
-ola
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Social Dynamics Simulator — v1</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #60a5fa;
+      --good: #34d399;
+      --bad: #f87171;
+      --warn: #fbbf24;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(160deg, #020617, var(--bg));
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      background: rgba(17, 24, 39, 0.95);
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 1.3rem;
+    }
+
+    p { color: var(--muted); line-height: 1.35; margin: 0 0 10px; }
+
+    .controls {
+      display: grid;
+      gap: 10px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.92rem;
+    }
+
+    label { color: #d1d5db; }
+
+    input[type="range"] { width: 100%; }
+
+    output {
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      min-width: 38px;
+      text-align: right;
+    }
+
+    .btns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 2px;
+    }
+
+    button {
+      border: 1px solid #475569;
+      background: #0b1222;
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:hover { border-color: var(--accent); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .stat {
+      background: var(--panel-2);
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 8px;
+    }
+
+    .stat .k {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-bottom: 2px;
+    }
+
+    .stat .v {
+      font-size: 1.05rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    canvas {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: radial-gradient(circle at 20% 20%, #111827, #020617);
+      display: block;
+      margin-bottom: 12px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      color: #cbd5e1;
+      font-size: 0.85rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+
+    @media (max-width: 980px) {
+      .container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="panel">
+      <h1>Agent-Based Social Simulator — v1</h1>
+      <p>200 agents on a small-world network play repeated prisoner's dilemma. They earn wealth, update status, and imitate successful neighbors.</p>
+
+      <div class="controls">
+        <div class="row">
+          <label for="stepsPerFrame">Steps / frame</label>
+          <output id="stepsPerFrameOut">2</output>
+        </div>
+        <input id="stepsPerFrame" type="range" min="1" max="20" step="1" value="2" />
+
+        <div class="row">
+          <label for="rewireProb">Small-world rewiring</label>
+          <output id="rewireProbOut">0.05</output>
+        </div>
+        <input id="rewireProb" type="range" min="0" max="0.5" step="0.01" value="0.05" />
+
+        <div class="row">
+          <label for="noise">Strategy mutation noise</label>
+          <output id="noiseOut">0.01</output>
+        </div>
+        <input id="noise" type="range" min="0" max="0.2" step="0.005" value="0.01" />
+
+        <div class="row">
+          <label for="statusWeight">Status reward weight</label>
+          <output id="statusWeightOut">0.60</output>
+        </div>
+        <input id="statusWeight" type="range" min="0" max="2" step="0.05" value="0.6" />
+
+        <div class="btns">
+          <button id="toggleBtn">Pause</button>
+          <button id="stepBtn">Step once</button>
+          <button id="resetBtn">Reset</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="k">Tick</div><div class="v" id="tickStat">0</div></div>
+        <div class="stat"><div class="k">Cooperation Rate</div><div class="v" id="coopStat">0.00</div></div>
+        <div class="stat"><div class="k">Gini (Wealth)</div><div class="v" id="giniStat">0.00</div></div>
+        <div class="stat"><div class="k">Avg Wealth</div><div class="v" id="wealthStat">0.00</div></div>
+        <div class="stat"><div class="k">Avg Status</div><div class="v" id="statusStat">0.00</div></div>
+        <div class="stat"><div class="k">Top 10% Wealth Share</div><div class="v" id="top10Stat">0.00</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <canvas id="networkCanvas" width="800" height="500"></canvas>
+      <canvas id="historyCanvas" width="800" height="220"></canvas>
+      <div class="legend">
+        <span><i class="dot" style="background:#34d399"></i>Always Cooperate</span>
+        <span><i class="dot" style="background:#f87171"></i>Always Defect</span>
+        <span><i class="dot" style="background:#60a5fa"></i>Tit-for-Tat</span>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const N = 200;
+    const K = 8;
+    const PAYOFF = {
+      CC: [3, 3],
+      DD: [1, 1],
+      CD: [0, 5],
+      DC: [5, 0],
+    };
+    const STRATEGIES = ["C", "D", "TFT"];
+    const COLORS = { C: "#34d399", D: "#f87171", TFT: "#60a5fa" };
+
+    const ui = {
+      stepsPerFrame: document.getElementById("stepsPerFrame"),
+      stepsPerFrameOut: document.getElementById("stepsPerFrameOut"),
+      rewireProb: document.getElementById("rewireProb"),
+      rewireProbOut: document.getElementById("rewireProbOut"),
+      noise: document.getElementById("noise"),
+      noiseOut: document.getElementById("noiseOut"),
+      statusWeight: document.getElementById("statusWeight"),
+      statusWeightOut: document.getElementById("statusWeightOut"),
+      toggleBtn: document.getElementById("toggleBtn"),
+      stepBtn: document.getElementById("stepBtn"),
+      resetBtn: document.getElementById("resetBtn"),
+      tickStat: document.getElementById("tickStat"),
+      coopStat: document.getElementById("coopStat"),
+      giniStat: document.getElementById("giniStat"),
+      wealthStat: document.getElementById("wealthStat"),
+      statusStat: document.getElementById("statusStat"),
+      top10Stat: document.getElementById("top10Stat"),
+    };
+
+    function randChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    function createSmallWorldGraph(n, k, beta) {
+      const neighbors = Array.from({ length: n }, () => new Set());
+      for (let i = 0; i < n; i++) {
+        for (let j = 1; j <= k / 2; j++) {
+          const r = (i + j) % n;
+          neighbors[i].add(r);
+          neighbors[r].add(i);
+        }
+      }
+
+      for (let i = 0; i < n; i++) {
+        for (let j = 1; j <= k / 2; j++) {
+          const oldTarget = (i + j) % n;
+          if (i < oldTarget && Math.random() < beta) {
+            neighbors[i].delete(oldTarget);
+            neighbors[oldTarget].delete(i);
+
+            let newTarget;
+            do {
+              newTarget = Math.floor(Math.random() * n);
+            } while (newTarget === i || neighbors[i].has(newTarget));
+
+            neighbors[i].add(newTarget);
+            neighbors[newTarget].add(i);
+          }
+        }
+      }
+      return neighbors;
+    }
+
+    function gini(values) {
+      const sorted = [...values].sort((a, b) => a - b);
+      const n = sorted.length;
+      const sum = sorted.reduce((acc, v) => acc + v, 0);
+      if (sum === 0) return 0;
+      let cumulative = 0;
+      for (let i = 0; i < n; i++) cumulative += (i + 1) * sorted[i];
+      return (2 * cumulative) / (n * sum) - (n + 1) / n;
+    }
+
+    function top10Share(values) {
+      const sorted = [...values].sort((a, b) => b - a);
+      const topCount = Math.max(1, Math.floor(values.length * 0.1));
+      const top = sorted.slice(0, topCount).reduce((a, b) => a + b, 0);
+      const total = sorted.reduce((a, b) => a + b, 0);
+      return total === 0 ? 0 : top / total;
+    }
+
+    function initSimulation() {
+      const beta = Number(ui.rewireProb.value);
+      const graph = createSmallWorldGraph(N, K, beta);
+      const agents = Array.from({ length: N }, (_, id) => ({
+        id,
+        strategy: randChoice(STRATEGIES),
+        wealth: 10 + Math.random() * 2,
+        status: Math.random(),
+        lastActions: new Map(),
+      }));
+
+      const positions = Array.from({ length: N }, (_, i) => {
+        const angle = (2 * Math.PI * i) / N;
+        const radius = 190 + (Math.random() * 60 - 30);
+        return {
+          x: 400 + Math.cos(angle) * radius,
+          y: 250 + Math.sin(angle) * radius,
+        };
+      });
+
+      return { agents, graph, positions, tick: 0, history: [] };
+    }
+
+    function chooseAction(agent, otherId) {
+      if (agent.strategy === "C") return "C";
+      if (agent.strategy === "D") return "D";
+      return agent.lastActions.get(otherId) ?? "C";
+    }
+
+    function playRound(sim) {
+      const statusWeight = Number(ui.statusWeight.value);
+      const seenPairs = new Set();
+      let coopActions = 0;
+      let totalActions = 0;
+
+      for (let i = 0; i < N; i++) {
+        for (const j of sim.graph[i]) {
+          if (i > j) continue;
+          const key = `${i}-${j}`;
+          if (seenPairs.has(key)) continue;
+          seenPairs.add(key);
+
+          const a = sim.agents[i];
+          const b = sim.agents[j];
+          const actA = chooseAction(a, j);
+          const actB = chooseAction(b, i);
+
+          totalActions += 2;
+          coopActions += (actA === "C") + (actB === "C");
+
+          let pa, pb;
+          if (actA === "C" && actB === "C") [pa, pb] = PAYOFF.CC;
+          else if (actA === "D" && actB === "D") [pa, pb] = PAYOFF.DD;
+          else if (actA === "C" && actB === "D") [pa, pb] = PAYOFF.CD;
+          else [pa, pb] = PAYOFF.DC;
+
+          a.wealth += pa;
+          b.wealth += pb;
+
+          const statusDeltaA = (actA === "C" ? 1 : -0.25) + (pa - 2) * 0.08;
+          const statusDeltaB = (actB === "C" ? 1 : -0.25) + (pb - 2) * 0.08;
+          a.status = Math.max(0, a.status + statusDeltaA * statusWeight * 0.05);
+          b.status = Math.max(0, b.status + statusDeltaB * statusWeight * 0.05);
+
+          a.lastActions.set(j, actB);
+          b.lastActions.set(i, actA);
+        }
+      }
+
+      const noise = Number(ui.noise.value);
+      for (let i = 0; i < N; i++) {
+        const agent = sim.agents[i];
+        const neigh = [...sim.graph[i]];
+        if (!neigh.length) continue;
+
+        const sample = randChoice(neigh);
+        const peer = sim.agents[sample];
+        const ownScore = agent.wealth * 0.75 + agent.status * 0.25;
+        const peerScore = peer.wealth * 0.75 + peer.status * 0.25;
+
+        if (Math.random() < noise) {
+          agent.strategy = randChoice(STRATEGIES);
+        } else if (peerScore > ownScore && Math.random() < 0.22) {
+          agent.strategy = peer.strategy;
+        }
+      }
+
+      sim.tick += 1;
+      const wealth = sim.agents.map(a => a.wealth);
+      const status = sim.agents.map(a => a.status);
+      const coopRate = totalActions ? coopActions / totalActions : 0;
+      const metrics = {
+        tick: sim.tick,
+        coopRate,
+        gini: gini(wealth),
+        avgWealth: wealth.reduce((a, b) => a + b, 0) / N,
+        avgStatus: status.reduce((a, b) => a + b, 0) / N,
+        top10: top10Share(wealth),
+      };
+      sim.history.push(metrics);
+      if (sim.history.length > 220) sim.history.shift();
+      return metrics;
+    }
+
+    function drawNetwork(sim) {
+      const canvas = document.getElementById("networkCanvas");
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.2)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < N; i++) {
+        for (const j of sim.graph[i]) {
+          if (i > j) continue;
+          const p1 = sim.positions[i];
+          const p2 = sim.positions[j];
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+      }
+
+      const maxStatus = Math.max(...sim.agents.map(a => a.status), 1);
+      for (const agent of sim.agents) {
+        const p = sim.positions[agent.id];
+        const r = 2 + Math.min(6, (agent.status / maxStatus) * 6);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS[agent.strategy];
+        ctx.fill();
+      }
+    }
+
+    function drawHistory(sim) {
+      const canvas = document.getElementById("historyCanvas");
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const margin = { l: 44, r: 10, t: 12, b: 24 };
+      const w = canvas.width - margin.l - margin.r;
+      const h = canvas.height - margin.t - margin.b;
+
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.35)";
+      ctx.beginPath();
+      ctx.moveTo(margin.l, margin.t);
+      ctx.lineTo(margin.l, margin.t + h);
+      ctx.lineTo(margin.l + w, margin.t + h);
+      ctx.stroke();
+
+      const hist = sim.history;
+      if (hist.length < 2) return;
+
+      function line(getY, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < hist.length; i++) {
+          const x = margin.l + (i / (hist.length - 1)) * w;
+          const y = margin.t + (1 - getY(hist[i])) * h;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+
+      line(p => p.coopRate, "#34d399");
+      line(p => Math.min(1, p.gini), "#f87171");
+      line(p => Math.min(1, p.top10), "#60a5fa");
+
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("0", 28, margin.t + h + 4);
+      ctx.fillText("1", 28, margin.t + 6);
+      ctx.fillText("Green=Coop  Red=Gini  Blue=Top10 share", margin.l + 10, 14);
+    }
+
+    function updateStats(metrics) {
+      ui.tickStat.textContent = metrics.tick.toString();
+      ui.coopStat.textContent = metrics.coopRate.toFixed(2);
+      ui.giniStat.textContent = metrics.gini.toFixed(2);
+      ui.wealthStat.textContent = metrics.avgWealth.toFixed(2);
+      ui.statusStat.textContent = metrics.avgStatus.toFixed(2);
+      ui.top10Stat.textContent = metrics.top10.toFixed(2);
+    }
+
+    function bindOutputs() {
+      const bindings = [
+        [ui.stepsPerFrame, ui.stepsPerFrameOut],
+        [ui.rewireProb, ui.rewireProbOut],
+        [ui.noise, ui.noiseOut],
+        [ui.statusWeight, ui.statusWeightOut],
+      ];
+      for (const [input, out] of bindings) {
+        const set = () => out.textContent = Number(input.value).toFixed(input.step.includes(".") ? input.step.split(".")[1].length : 0);
+        input.addEventListener("input", set);
+        set();
+      }
+    }
+
+    let sim = initSimulation();
+    let running = true;
+
+    function tickLoop() {
+      if (running) {
+        const steps = Number(ui.stepsPerFrame.value);
+        let metrics;
+        for (let i = 0; i < steps; i++) metrics = playRound(sim);
+        updateStats(metrics);
+      }
+      drawNetwork(sim);
+      drawHistory(sim);
+      requestAnimationFrame(tickLoop);
+    }
+
+    ui.toggleBtn.addEventListener("click", () => {
+      running = !running;
+      ui.toggleBtn.textContent = running ? "Pause" : "Resume";
+    });
+
+    ui.stepBtn.addEventListener("click", () => {
+      const metrics = playRound(sim);
+      updateStats(metrics);
+      drawNetwork(sim);
+      drawHistory(sim);
+    });
+
+    ui.resetBtn.addEventListener("click", () => {
+      sim = initSimulation();
+      running = true;
+      ui.toggleBtn.textContent = "Pause";
+      const metrics = { tick: 0, coopRate: 0, gini: 0, avgWealth: 0, avgStatus: 0, top10: 0 };
+      updateStats(metrics);
+      drawNetwork(sim);
+      drawHistory(sim);
+    });
+
+    ui.rewireProb.addEventListener("change", () => {
+      sim = initSimulation();
+    });
+
+    bindOutputs();
+    drawNetwork(sim);
+    drawHistory(sim);
+    tickLoop();
+  </script>
+</body>
+</html>
