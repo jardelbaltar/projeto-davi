@@ -155,7 +155,7 @@
   <div class="container">
     <section class="panel">
       <h1>Agent-Based Social Simulator — v1</h1>
-      <p>200 agents on a small-world network play repeated prisoner's dilemma. They earn wealth, update status, and imitate successful neighbors.</p>
+      <p>200 agents on a small-world network exchange labor services. They manage energy, money, and status through repeated local transactions.</p>
 
       <div class="controls">
         <div class="row">
@@ -191,7 +191,7 @@
 
       <div class="stats">
         <div class="stat"><div class="k">Tick</div><div class="v" id="tickStat">0</div></div>
-        <div class="stat"><div class="k">Cooperation Rate</div><div class="v" id="coopStat">0.00</div></div>
+        <div class="stat"><div class="k">Exchange Success</div><div class="v" id="coopStat">0.00</div></div>
         <div class="stat"><div class="k">Gini (Wealth)</div><div class="v" id="giniStat">0.00</div></div>
         <div class="stat"><div class="k">Avg Wealth</div><div class="v" id="wealthStat">0.00</div></div>
         <div class="stat"><div class="k">Avg Status</div><div class="v" id="statusStat">0.00</div></div>
@@ -203,9 +203,9 @@
       <canvas id="networkCanvas" width="800" height="500"></canvas>
       <canvas id="historyCanvas" width="800" height="220"></canvas>
       <div class="legend">
-        <span><i class="dot" style="background:#34d399"></i>Always Cooperate</span>
-        <span><i class="dot" style="background:#f87171"></i>Always Defect</span>
-        <span><i class="dot" style="background:#60a5fa"></i>Tit-for-Tat</span>
+        <span><i class="dot" style="background:#34d399"></i>Reliable provider</span>
+        <span><i class="dot" style="background:#f87171"></i>Low status / exploitative</span>
+        <span><i class="dot" style="background:#60a5fa"></i>Balanced participant</span>
       </div>
     </section>
   </div>
@@ -213,14 +213,11 @@
   <script>
     const N = 200;
     const K = 8;
-    const PAYOFF = {
-      CC: [3, 3],
-      DD: [1, 1],
-      CD: [0, 5],
-      DC: [5, 0],
+    const TRANSACTION = {
+      requiredEnergy: 1.2,
+      regenRate: 0.55,
+      baseValue: 2.8,
     };
-    const STRATEGIES = ["C", "D", "TFT"];
-    const COLORS = { C: "#34d399", D: "#f87171", TFT: "#60a5fa" };
 
     const ui = {
       stepsPerFrame: document.getElementById("stepsPerFrame"),
@@ -297,11 +294,18 @@
       const graph = createSmallWorldGraph(N, K, beta);
       const agents = Array.from({ length: N }, (_, id) => ({
         id,
-        strategy: randChoice(STRATEGIES),
-        wealth: 10 + Math.random() * 2,
-        status: Math.random(),
-        lastActions: new Map(),
+        maxEnergy: 6 + Math.random() * 3,
+        energy: 0,
+        money: 10 + Math.random() * 2,
+        skill: 0.6 + Math.random() * 0.8,
+        askingPrice: 1.8 + Math.random() * 2.4,
+        reliability: 0.45 + Math.random() * 0.5,
+        status: 0.45 + Math.random() * 0.35,
+        output: 0,
       }));
+      for (const agent of agents) {
+        agent.energy = agent.maxEnergy * (0.45 + Math.random() * 0.5);
+      }
 
       const positions = Array.from({ length: N }, (_, i) => {
         const angle = (2 * Math.PI * i) / N;
@@ -315,17 +319,57 @@
       return { agents, graph, positions, tick: 0, history: [] };
     }
 
-    function chooseAction(agent, otherId) {
-      if (agent.strategy === "C") return "C";
-      if (agent.strategy === "D") return "D";
-      return agent.lastActions.get(otherId) ?? "C";
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function runTransaction(seller, buyer, context) {
+      const { requiredEnergy, baseValue, statusWeight, noise } = context;
+      const price = Math.max(0.1, seller.askingPrice * (0.9 + Math.random() * 0.2));
+      const serviceValue = baseValue * seller.skill;
+      const fairnessRatio = price / Math.max(serviceValue, 0.1);
+
+      if (seller.energy < requiredEnergy) {
+        seller.status = clamp(seller.status - 0.03 * statusWeight, 0, 2);
+        buyer.status = clamp(buyer.status - 0.01 * statusWeight, 0, 2);
+        return { success: false, fair: false, reason: "exhausted", price: 0, utility: 0 };
+      }
+
+      if (buyer.money < price) {
+        buyer.status = clamp(buyer.status - 0.02 * statusWeight, 0, 2);
+        seller.status = clamp(seller.status - 0.01 * statusWeight, 0, 2);
+        return { success: false, fair: false, reason: "insolvent", price: 0, utility: 0 };
+      }
+
+      seller.energy -= requiredEnergy;
+      buyer.money -= price;
+      seller.money += price;
+
+      const stochasticQuality = 1 + (Math.random() * 2 - 1) * noise;
+      const utility = serviceValue * seller.reliability * stochasticQuality;
+      buyer.output += utility;
+
+      const fair = fairnessRatio >= 0.75 && fairnessRatio <= 1.25;
+      if (fair) {
+        seller.status = clamp(seller.status + 0.03 * statusWeight, 0, 2);
+        buyer.status = clamp(buyer.status + 0.02 * statusWeight, 0, 2);
+      } else if (fairnessRatio > 1.25) {
+        seller.status = clamp(seller.status - 0.05 * statusWeight, 0, 2);
+        buyer.status = clamp(buyer.status - 0.02 * statusWeight, 0, 2);
+      } else {
+        seller.status = clamp(seller.status - 0.01 * statusWeight, 0, 2);
+        buyer.status = clamp(buyer.status + 0.01 * statusWeight, 0, 2);
+      }
+
+      return { success: true, fair, reason: "completed", price, utility };
     }
 
     function playRound(sim) {
       const statusWeight = Number(ui.statusWeight.value);
       const seenPairs = new Set();
-      let coopActions = 0;
-      let totalActions = 0;
+      const noise = Number(ui.noise.value);
+      let successfulExchanges = 0;
+      let attemptedExchanges = 0;
 
       for (let i = 0; i < N; i++) {
         for (const j of sim.graph[i]) {
@@ -334,55 +378,44 @@
           if (seenPairs.has(key)) continue;
           seenPairs.add(key);
 
-          const a = sim.agents[i];
-          const b = sim.agents[j];
-          const actA = chooseAction(a, j);
-          const actB = chooseAction(b, i);
+          const firstSeller = Math.random() < 0.5 ? sim.agents[i] : sim.agents[j];
+          const firstBuyer = firstSeller.id === i ? sim.agents[j] : sim.agents[i];
+          const secondSeller = firstBuyer;
+          const secondBuyer = firstSeller;
 
-          totalActions += 2;
-          coopActions += (actA === "C") + (actB === "C");
+          attemptedExchanges += 2;
 
-          let pa, pb;
-          if (actA === "C" && actB === "C") [pa, pb] = PAYOFF.CC;
-          else if (actA === "D" && actB === "D") [pa, pb] = PAYOFF.DD;
-          else if (actA === "C" && actB === "D") [pa, pb] = PAYOFF.CD;
-          else [pa, pb] = PAYOFF.DC;
+          const result1 = runTransaction(firstSeller, firstBuyer, {
+            requiredEnergy: TRANSACTION.requiredEnergy,
+            baseValue: TRANSACTION.baseValue,
+            statusWeight,
+            noise,
+          });
+          const result2 = runTransaction(secondSeller, secondBuyer, {
+            requiredEnergy: TRANSACTION.requiredEnergy,
+            baseValue: TRANSACTION.baseValue,
+            statusWeight,
+            noise,
+          });
 
-          a.wealth += pa;
-          b.wealth += pb;
-
-          const statusDeltaA = (actA === "C" ? 1 : -0.25) + (pa - 2) * 0.08;
-          const statusDeltaB = (actB === "C" ? 1 : -0.25) + (pb - 2) * 0.08;
-          a.status = Math.max(0, a.status + statusDeltaA * statusWeight * 0.05);
-          b.status = Math.max(0, b.status + statusDeltaB * statusWeight * 0.05);
-
-          a.lastActions.set(j, actB);
-          b.lastActions.set(i, actA);
+          successfulExchanges += Number(result1.success) + Number(result2.success);
         }
       }
 
-      const noise = Number(ui.noise.value);
       for (let i = 0; i < N; i++) {
         const agent = sim.agents[i];
-        const neigh = [...sim.graph[i]];
-        if (!neigh.length) continue;
-
-        const sample = randChoice(neigh);
-        const peer = sim.agents[sample];
-        const ownScore = agent.wealth * 0.75 + agent.status * 0.25;
-        const peerScore = peer.wealth * 0.75 + peer.status * 0.25;
-
-        if (Math.random() < noise) {
-          agent.strategy = randChoice(STRATEGIES);
-        } else if (peerScore > ownScore && Math.random() < 0.22) {
-          agent.strategy = peer.strategy;
-        }
+        agent.energy = Math.min(agent.maxEnergy, agent.energy + TRANSACTION.regenRate);
+        const marketPressure = Math.max(0.7, 1 + (Math.random() * 2 - 1) * noise);
+        const scarcity = 1 - agent.energy / agent.maxEnergy;
+        agent.askingPrice = clamp(agent.askingPrice * 0.995 + scarcity * 0.01, 0.6, 6) * marketPressure;
+        agent.askingPrice = clamp(agent.askingPrice, 0.6, 6);
+        agent.reliability = clamp(agent.reliability + (Math.random() * 2 - 1) * noise * 0.05, 0.2, 1.2);
       }
 
       sim.tick += 1;
-      const wealth = sim.agents.map(a => a.wealth);
+      const wealth = sim.agents.map(a => a.money);
       const status = sim.agents.map(a => a.status);
-      const coopRate = totalActions ? coopActions / totalActions : 0;
+      const coopRate = attemptedExchanges ? successfulExchanges / attemptedExchanges : 0;
       const metrics = {
         tick: sim.tick,
         coopRate,
@@ -415,13 +448,22 @@
         }
       }
 
+      function getAgentColor(agent) {
+        const reliability = clamp(agent.reliability, 0.2, 1.2);
+        const status = clamp(agent.status / 1.5, 0, 1);
+        const red = Math.round(250 - reliability * 130 + (1 - status) * 35);
+        const green = Math.round(60 + reliability * 150 + status * 40);
+        const blue = Math.round(90 + status * 130);
+        return `rgb(${clamp(red, 20, 255)}, ${clamp(green, 20, 255)}, ${clamp(blue, 20, 255)})`;
+      }
+
       const maxStatus = Math.max(...sim.agents.map(a => a.status), 1);
       for (const agent of sim.agents) {
         const p = sim.positions[agent.id];
         const r = 2 + Math.min(6, (agent.status / maxStatus) * 6);
         ctx.beginPath();
         ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = COLORS[agent.strategy];
+        ctx.fillStyle = getAgentColor(agent);
         ctx.fill();
       }
     }
@@ -466,7 +508,7 @@
       ctx.font = "12px sans-serif";
       ctx.fillText("0", 28, margin.t + h + 4);
       ctx.fillText("1", 28, margin.t + 6);
-      ctx.fillText("Green=Coop  Red=Gini  Blue=Top10 share", margin.l + 10, 14);
+      ctx.fillText("Green=Exchange success  Red=Gini  Blue=Top10 share", margin.l + 10, 14);
     }
 
     function updateStats(metrics) {
